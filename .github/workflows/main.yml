@@ -6,6 +6,8 @@ jobs:
   build:
     name: Dong goi file IPA
     runs-on: macos-latest
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
     steps:
       - name: Lay ma nguon
@@ -13,16 +15,11 @@ jobs:
         with:
           lfs: true
 
-      - name: Fix loi quyen thuc thi
-        run: |
-          [ -f MapFileParser.sh ] && chmod +x MapFileParser.sh || true
-          [ -f process_symbols.sh ] && chmod +x process_symbols.sh || true
-
       - name: Hack bypass loi thieu Plugin
         run: |
-          # Kiểm tra xem file main.mm có tồn tại không trước khi tiêm
-          if [ -f Classes/main.mm ]; then
-            cat << 'EOF' >> Classes/main.mm
+          MAIN_MM=$(find . -name "main.mm" | head -n 1)
+          if [ -n "$MAIN_MM" ]; then
+            cat << 'EOF' >> "$MAIN_MM"
           extern "C" {
               int iOSPlugins__SMSsend() { return 0; }
               int iOSPlugins__Send() { return 0; }
@@ -34,14 +31,23 @@ jobs:
               int iOSPlugins__unpause() { return 0; }
           }
           EOF
-          else
-            echo "Khong tim thay Classes/main.mm, bo qua inject!"
           fi
 
       - name: Build Xcode Project
         run: |
-          # Dùng workspace thay vì project (Chuẩn Unity 2021+)
-          xcodebuild -workspace Unity-iPhone.xcworkspace -scheme Unity-iPhone -configuration Release clean build \
+          PROJECT_FILE=$(find . -type d \( -name "*.xcworkspace" -o -name "*.xcodeproj" \) | head -n 1)
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "Loi: Khong tim thay du an Xcode!"
+            exit 1
+          fi
+          
+          if [[ "$PROJECT_FILE" == *".xcworkspace" ]]; then
+            CMD="-workspace $PROJECT_FILE -scheme Unity-iPhone"
+          else
+            CMD="-project $PROJECT_FILE -scheme Unity-iPhone"
+          fi
+          
+          xcodebuild $CMD -configuration Release clean build \
           CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
           -sdk iphoneos \
           OTHER_LDFLAGS="-Wl,-undefined,dynamic_lookup" \
@@ -50,8 +56,8 @@ jobs:
       - name: Dong goi thanh file .IPA
         run: |
           mkdir -p Payload
-          # Copy file app vào thư mục Payload
-          cp -r build/Release-iphoneos/*.app Payload/
+          APP_FILE=$(find build -name "*.app" | head -n 1)
+          cp -r "$APP_FILE" Payload/
           zip -r Avatar_iOS_V1.ipa Payload
 
       - name: Tra hang cho Chu tich
